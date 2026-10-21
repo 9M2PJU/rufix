@@ -26,22 +26,34 @@ Ubuntu, Debian and other GTK desktops.
 - Drag & drop an image onto the window; open images from the file manager.
 - Progress, speed and time remaining, cancel, and a saveable log.
 
-## Install on Linux Mint
+## Install on Linux Mint / Ubuntu / Debian
+
+Download `rufix_0.1_all.deb` from the
+[latest release](https://github.com/thuutien/rufix/releases/latest) and run:
 
 ```bash
-sudo apt install python3-gi gir1.2-gtk-3.0 dosfstools ntfs-3g exfatprogs e2fsprogs wimtools
+sudo apt install ./rufix_0.1_all.deb
 ```
 
-Then either install system-wide:
+`apt` pulls in all dependencies. For splitting large Windows images, also
+install `wimtools`.
+
+## Install on other distributions
+
+Download `rufix-0.1.tar.gz` from the
+[latest release](https://github.com/thuutien/rufix/releases/latest), install
+the dependencies (Python 3 GObject bindings, GTK 3, dosfstools, ntfs-3g,
+exfatprogs, e2fsprogs, polkit), then:
 
 ```bash
-sudo ./install.sh
+tar xzf rufix-0.1.tar.gz && cd rufix-0.1 && sudo ./install.sh
 ```
 
-or build and install a `.deb`:
+## Build the packages yourself
 
 ```bash
-./packaging/build-deb.sh && sudo apt install ./dist/rufix_1.0.0_all.deb
+./packaging/build-deb.sh       # dist/rufix_<version>_all.deb
+./packaging/build-tarball.sh   # dist/rufix-<version>.tar.gz
 ```
 
 Rufix then appears in the menu under **Administration / System Tools**.
