@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Rufix
+GenericName=USB Drive Creator
+Comment=Format USB drives and create bootable USB drives from ISO images
+Exec=rufix %f
+Icon=rufix
+Terminal=false
+Categories=System;Utility;GTK;
+Keywords=usb;iso;format;bootable;rufus;flash;image;
+MimeType=application/x-cd-image;application/x-iso9660-image;application/x-raw-disk-image;application/x-raw-disk-image-xz-compressed;
+StartupNotify=true
