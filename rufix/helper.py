@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Rufix privileged helper.
 
+Rufix is a clone of Rufus (https://rufus.ie) for Linux: it formats USB drives
+and creates bootable USB drives from ISO/IMG images. It is an independent
+project and is not affiliated with Rufus or its authors.
+
 Runs as root (via pkexec). Reads one JSON job description from the first line
 of stdin, performs it, and reports progress as JSON lines on stdout:
 
