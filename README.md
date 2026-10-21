@@ -28,11 +28,11 @@ Ubuntu, Debian and other GTK desktops.
 
 ## Install on Linux Mint / Ubuntu / Debian
 
-Download `rufix_0.1_all.deb` from the
+Download `rufix_0.1.1_all.deb` from the
 [latest release](https://github.com/thuutien/rufix/releases/latest) and run:
 
 ```bash
-sudo apt install ./rufix_0.1_all.deb
+sudo apt install ./rufix_0.1.1_all.deb
 ```
 
 `apt` pulls in all dependencies. For splitting large Windows images, also
@@ -40,13 +40,13 @@ install `wimtools`.
 
 ## Install on other distributions
 
-Download `rufix-0.1.tar.gz` from the
+Download `rufix-0.1.1.tar.gz` from the
 [latest release](https://github.com/thuutien/rufix/releases/latest), install
 the dependencies (Python 3 GObject bindings, GTK 3, dosfstools, ntfs-3g,
 exfatprogs, e2fsprogs, polkit), then:
 
 ```bash
-tar xzf rufix-0.1.tar.gz && cd rufix-0.1 && sudo ./install.sh
+tar xzf rufix-0.1.1.tar.gz && cd rufix-0.1.1 && sudo ./install.sh
 ```
 
 ## Build the packages yourself
