@@ -19,7 +19,7 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import APP_ID, APP_NAME, __version__  # noqa: E402
-from .devices import Device, human_size, list_devices  # noqa: E402
+from .devices import Device, human_size, list_devices, mountable_volumes  # noqa: E402
 from .imageinfo import ImageInfo, inspect  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -723,6 +723,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         self._run_job(job)
 
     def _run_job(self, job: dict):
+        self._job_device = job["device"]
         cmd = helper_command()
         self.log("Starting: " + " ".join(cmd))
         self.log("Job: " + json.dumps({k: v for k, v in job.items()}))
@@ -819,6 +820,7 @@ class RufixWindow(Gtk.ApplicationWindow):
             self.set_status(f"Operation completed in {elapsed // 60}m {elapsed % 60}s")
             self.log("Operation completed successfully.")
             self._notify("Rufix: operation completed", "Your USB drive is ready.")
+            threading.Thread(target=self._remount, args=(self._job_device,), daemon=True).start()
         else:
             if self.got_done:
                 reason = self._done_msg.get("m", "Unknown error")
@@ -835,6 +837,33 @@ class RufixWindow(Gtk.ApplicationWindow):
                 self.error("The operation failed.", reason + "\n\nSee the log for details.")
         self._update_state()
         return False
+
+    def _remount(self, dev_path: str):
+        """Mount the new volumes as the user, like plugging the drive in again.
+
+        The helper has to unmount the drive to write it, and the desktop only
+        automounts on hotplug, so without this the drive vanishes from the file
+        manager until it is unplugged and reinserted.
+        """
+        subprocess.run(["udevadm", "settle", "--timeout=10"], capture_output=True)
+        volumes: List[str] = []
+        for _ in range(10):
+            volumes = mountable_volumes(dev_path)
+            if volumes:
+                break
+            time.sleep(0.5)
+        for vol in volumes:
+            for attempt in range(5):
+                proc = subprocess.run(["udisksctl", "mount", "-b", vol, "--no-user-interaction"],
+                                      capture_output=True, text=True)
+                if proc.returncode == 0:
+                    GLib.idle_add(self.log, proc.stdout.strip())
+                    break
+                time.sleep(1)
+            else:
+                GLib.idle_add(self.log, f"Could not mount {vol}: "
+                              f"{(proc.stderr or proc.stdout).strip()}")
+        GLib.idle_add(self.refresh_devices, True)
 
     def _notify(self, title: str, body: str):
         app = self.get_application()

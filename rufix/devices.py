@@ -115,6 +115,31 @@ def _strip(v) -> str:
     return (v or "").strip()
 
 
+def mountable_volumes(dev_path: str) -> List[str]:
+    """Unmounted partitions (or the bare disk) on dev_path that hold a file system."""
+    for col in ("MOUNTPOINTS", "MOUNTPOINT"):
+        proc = subprocess.run(["lsblk", "-J", "-o", f"PATH,TYPE,FSTYPE,{col}", dev_path],
+                              capture_output=True, text=True)
+        if proc.returncode == 0:
+            break
+    else:
+        return []
+    try:
+        nodes = json.loads(proc.stdout).get("blockdevices", [])
+    except json.JSONDecodeError:
+        return []
+    # Flatten: lsblk nests partitions as children or lists them flat,
+    # depending on version and columns.
+    flat = []
+    for n in nodes:
+        flat.append(n)
+        flat.extend(n.get("children") or [])
+    parts = [n for n in flat if n.get("type") == "part"]
+    candidates = parts or [n for n in flat if n.get("type") == "disk"]
+    return [n["path"] for n in candidates
+            if _strip(n.get("fstype")) and not _mounts(n)]
+
+
 def _mmc_type(name: str) -> str:
     try:
         with open(f"/sys/block/{name}/device/type") as f:
