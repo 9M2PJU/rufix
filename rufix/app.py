@@ -407,7 +407,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         main.pack_start(field_label("Boot selection"), False, False, 0)
         row = Gtk.Box(spacing=6)
         self.boot_combo = Gtk.ComboBoxText()
-        self.boot_combo.append("image", "Disk or ISO image (Please select)")
+        self.boot_combo.append("image", "Disk or ISO image")
         self.boot_combo.append("archive", "Compressed file - extract to drive")
         self.boot_combo.append("none", "Non bootable")
         self.boot_combo.set_active_id("image")
@@ -813,15 +813,6 @@ class RufixWindow(Gtk.ApplicationWindow):
         else:
             self.load_image(path)
 
-    def _set_boot_text(self, boot_id: str, text: str):
-        model = self.boot_combo.get_model()
-        for i, row in enumerate(model):
-            if row[1] == boot_id:
-                self.boot_combo.remove(i)
-                self.boot_combo.insert(i, boot_id, text)
-                break
-        self.boot_combo.set_active_id(boot_id)
-
     def load_archive(self, path: str):
         try:
             size = os.path.getsize(path)
@@ -830,7 +821,6 @@ class RufixWindow(Gtk.ApplicationWindow):
             return
         self.archive = path
         self.last_dir = os.path.dirname(path)
-        # The entry keeps its title; the chosen file shows in the status bar and tooltip.
         self.boot_combo.set_active_id("archive")
         self.log(f"Selected compressed file: {path} ({human_size(size)})")
         self.set_status(f"Will extract: {os.path.basename(path)}")
@@ -848,7 +838,7 @@ class RufixWindow(Gtk.ApplicationWindow):
             return
         self.image = info
         self.last_dir = os.path.dirname(path)
-        self._set_boot_text("image", info.filename)
+        self.boot_combo.set_active_id("image")
         self.log(f"Selected image: {path} ({human_size(info.size)}), kind={info.kind}, "
                  f"label='{info.label}', hybrid={info.is_hybrid}, windows={info.is_windows}, "
                  f"efi={info.has_efi}, bios={info.has_bios}")
