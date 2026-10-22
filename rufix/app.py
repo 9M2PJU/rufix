@@ -96,7 +96,10 @@ def helper_command() -> List[str]:
         # The helper needs the host's formatting tools and raw device access,
         # so it runs outside the sandbox with the host's Python.
         return host_command(["pkexec", "/usr/bin/python3", host_path(SOURCE_HELPER)])
-    if os.path.exists(INSTALLED_HELPER):
+    # Use the installed helper only when this is the installed copy of Rufix;
+    # a source checkout must run its own (possibly newer) helper.
+    if HERE == os.path.join(os.path.dirname(INSTALLED_HELPER), "rufix") and \
+            os.path.exists(INSTALLED_HELPER):
         helper = [INSTALLED_HELPER]
     else:
         helper = [sys.executable, SOURCE_HELPER]
