@@ -5,7 +5,7 @@
 #
 # Pick a version, skip dependency installation, or uninstall:
 #
-#   curl -fsSL .../quick-install.sh | sudo bash -s -- 0.1.1
+#   curl -fsSL .../quick-install.sh | sudo bash -s -- 0.2.0
 #   curl -fsSL .../quick-install.sh | sudo bash -s -- --no-deps
 #   curl -fsSL .../quick-install.sh | sudo bash -s -- --uninstall
 #
