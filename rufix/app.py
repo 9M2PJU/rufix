@@ -408,7 +408,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         row = Gtk.Box(spacing=6)
         self.boot_combo = Gtk.ComboBoxText()
         self.boot_combo.append("image", "Disk or ISO image (Please select)")
-        self.boot_combo.append("archive", "Compressed file - extract to drive (Please select)")
+        self.boot_combo.append("archive", "Compressed file - extract to drive")
         self.boot_combo.append("none", "Non bootable")
         self.boot_combo.set_active_id("image")
         self.boot_combo.connect("changed", lambda *_: self._update_state())
@@ -826,7 +826,8 @@ class RufixWindow(Gtk.ApplicationWindow):
             return
         self.archive = path
         self.last_dir = os.path.dirname(path)
-        self._set_boot_text("archive", os.path.basename(path))
+        # The entry keeps its title; the chosen file shows in the status bar and tooltip.
+        self.boot_combo.set_active_id("archive")
         self.log(f"Selected compressed file: {path} ({human_size(size)})")
         self.set_status(f"Will extract: {os.path.basename(path)}")
         self._populate_fs()
@@ -926,6 +927,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         bootable = self.bootable
         has_image = bool(self.image)
         has_file = bool(self.selected_file)
+        self.boot_combo.set_tooltip_text(self.selected_file)
         self.select_btn.set_sensitive((bootable or self.extracting) and not self.busy)
         self.hash_btn.set_sensitive(has_file and not self.busy)
         show_mode = bootable and has_image
