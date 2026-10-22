@@ -1048,6 +1048,9 @@ def job_extract(job, dev, dev_size, workdir):
     part = part_path(dev, 1)
     dest = os.path.join(workdir, "usb")
     os.makedirs(dest)
+    # mkdtemp creates workdir as 0700 root; the unprivileged extractor needs
+    # to pass through it to reach the mounted drive (no listing rights).
+    os.chmod(workdir, 0o711)
     uid, gid = invoking_user()
     if fs == "ntfs":
         ok = run(["mount", "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid}", part, dest],
