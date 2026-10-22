@@ -5,8 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from typing import List, Optional
@@ -18,7 +20,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
-from . import APP_ID, APP_NAME, __version__  # noqa: E402
+from . import APP_ID, APP_NAME, __version__, updater  # noqa: E402
 from .devices import Device, human_size, list_devices, mountable_volumes  # noqa: E402
 from .imageinfo import ImageInfo, inspect  # noqa: E402
 
@@ -26,6 +28,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INSTALLED_HELPER = "/usr/lib/rufix/rufix-helper"
 SOURCE_HELPER = os.path.join(HERE, "helper.py")
 SETTINGS_FILE = os.path.join(GLib.get_user_config_dir(), "rufix", "settings.json")
+# Saved even when "Remember last used settings" is off.
+PREF_KEYS = ("remember", "check_updates")
 
 FS_LABELS = {
     "fat32": "FAT32",
@@ -277,8 +281,13 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.start_time = 0.0
         self.got_done = False
         self.settings = load_settings()
+        if not self.settings.get("remember", True):
+            # Keep only the preferences; drop any previously saved state.
+            self.settings = {k: self.settings[k] for k in PREF_KEYS if k in self.settings}
         self.last_dir = self.settings.get("last_dir") or os.path.expanduser("~/Downloads")
         self.win_opts = self.settings.get("win_opts") or {}
+        self.latest: Optional[updater.Release] = None
+        self.updating = False
         self.log_window = LogWindow(self)
 
         provider = Gtk.CssProvider()
@@ -294,6 +303,8 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.refresh_devices(force=True)
         self._restore_settings()
         GLib.timeout_add_seconds(2, self._poll_devices)
+        if self.auto_update_check.get_active():
+            self._check_updates(manual=False)
 
     # ------------------------------------------------------------ settings
     def _restore_settings(self):
@@ -324,7 +335,15 @@ class RufixWindow(Gtk.ApplicationWindow):
         self._update_state()
 
     def _save_settings(self):
+        prefs = {
+            "remember": self.remember_check.get_active(),
+            "check_updates": self.auto_update_check.get_active(),
+        }
+        if not prefs["remember"]:
+            save_settings(prefs)
+            return
         save_settings({
+            **prefs,
             "boot": self.boot_combo.get_active_id(),
             "image": self.image.path if self.image else None,
             "last_dir": self.last_dir,
@@ -344,9 +363,13 @@ class RufixWindow(Gtk.ApplicationWindow):
     # ------------------------------------------------------------------ UI
     def _build(self):
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.notebook = Gtk.Notebook()
+        self.notebook.set_show_border(False)
+        outer.pack_start(self.notebook, True, True, 0)
         main = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         main.set_border_width(12)
-        outer.pack_start(main, True, True, 0)
+        self.notebook.append_page(main, Gtk.Label(label="Drive"))
+        self.notebook.append_page(self._build_settings_page(), Gtk.Label(label="Settings"))
 
         # ---- Drive Properties
         main.pack_start(section("Drive Properties"), False, False, 0)
@@ -492,6 +515,154 @@ class RufixWindow(Gtk.ApplicationWindow):
                          self.verify_check, self.label_entry, self.fs_combo,
                          self.cluster_combo, self.quick_check, self.bb_check, self.bb_combo]
         self._update_state()
+
+    def _build_settings_page(self) -> Gtk.Box:
+        page = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        page.set_border_width(12)
+
+        page.pack_start(section("General"), False, False, 0)
+        self.remember_check = Gtk.CheckButton(label="Remember last used settings")
+        self.remember_check.set_tooltip_text(
+            "Restore the boot selection, image, format options and advanced options "
+            "the next time Rufix starts. The target drive is never remembered.")
+        self.remember_check.set_active(self.settings.get("remember", True))
+        self.remember_check.connect("toggled", lambda *_: self._save_settings())
+        page.pack_start(self.remember_check, False, False, 0)
+
+        page.pack_start(section("Updates"), False, False, 6)
+        page.pack_start(Gtk.Label(label=f"Installed version: {__version__}", xalign=0),
+                        False, False, 0)
+        self.auto_update_check = Gtk.CheckButton(label="Check for updates when Rufix starts")
+        self.auto_update_check.set_active(self.settings.get("check_updates", True))
+        self.auto_update_check.connect("toggled", lambda *_: self._save_settings())
+        page.pack_start(self.auto_update_check, False, False, 0)
+
+        row = Gtk.Box(spacing=6)
+        row.set_margin_top(6)
+        self.check_update_btn = Gtk.Button(label="Check for updates")
+        self.check_update_btn.connect("clicked", lambda *_: self._check_updates(manual=True))
+        self.install_update_btn = Gtk.Button(label="Install update")
+        self.install_update_btn.get_style_context().add_class("suggested-action")
+        self.install_update_btn.connect("clicked", self._on_install_update)
+        self.install_update_btn.set_no_show_all(True)
+        row.pack_start(self.check_update_btn, False, False, 0)
+        row.pack_start(self.install_update_btn, False, False, 0)
+        page.pack_start(row, False, False, 0)
+        self.update_label = Gtk.Label(xalign=0)
+        self.update_label.set_line_wrap(True)
+        page.pack_start(self.update_label, False, False, 0)
+        return page
+
+    # ------------------------------------------------------------ updates
+    def _check_updates(self, manual: bool):
+        self.check_update_btn.set_sensitive(False)
+        if manual:
+            self.update_label.set_text("Checking for updates...")
+
+        def work():
+            try:
+                rel, err = updater.fetch_latest(), None
+            except (OSError, ValueError) as e:
+                rel, err = None, str(e)
+            GLib.idle_add(self._on_update_checked, rel, err, manual)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_checked(self, rel: Optional[updater.Release], err: Optional[str],
+                           manual: bool):
+        self.check_update_btn.set_sensitive(True)
+        if err:
+            self.log(f"Update check failed: {err}")
+            self.update_label.set_text(f"Could not check for updates: {err}" if manual else "")
+            return False
+        if not updater.is_newer(rel.version):
+            self.latest = None
+            self.install_update_btn.hide()
+            self.update_label.set_text(f"You have the latest version ({__version__})."
+                                       if manual else "")
+            return False
+        self.latest = rel
+        method = updater.install_method()
+        if updater.asset_for(rel, method):
+            self.install_update_btn.set_label(f"Install {rel.version}")
+        else:
+            self.install_update_btn.set_label("Open download page")
+        self.install_update_btn.show()
+        self.update_label.set_text(f"{APP_NAME} {rel.version} is available "
+                                   f"(you have {__version__}).")
+        self.log(f"Update available: {rel.version}")
+        if not manual and not self.busy:
+            self.set_status(f"{APP_NAME} {rel.version} is available - see the Settings tab")
+        self._update_state()
+        return False
+
+    def _on_install_update(self, *_):
+        rel = self.latest
+        if not rel or self.busy or self.updating:
+            return
+        method = updater.install_method()
+        asset = updater.asset_for(rel, method)
+        if not asset:
+            hint = {
+                "package": "Rufix was installed by your package manager; update it there "
+                           "(for example 'yay -Syu' or 'sudo dnf upgrade').",
+                "manual": "This copy of Rufix runs from source or an AppImage, so it cannot "
+                          "replace itself.",
+            }.get(method, "No installable package for this system was found in the release.")
+            self.update_label.set_text(hint + " Opening the download page...")
+            Gtk.show_uri_on_window(self, rel.url, Gdk.CURRENT_TIME)
+            return
+        if not self.confirm(f"Install {APP_NAME} {rel.version}?",
+                            f"{asset} will be downloaded from GitHub, checked against its "
+                            "published SHA-256 checksum and installed. You will be asked "
+                            "for your password.", Gtk.MessageType.QUESTION):
+            return
+
+        self.updating = True
+        self.check_update_btn.set_sensitive(False)
+        self._update_state()
+        self.update_label.set_text(f"Downloading {asset}...")
+        self.log(f"Updating to {rel.version} via {method}: {asset}")
+
+        def progress(frac: float):
+            GLib.idle_add(self.update_label.set_text,
+                          f"Downloading {asset}... {int(frac * 100)}%")
+
+        def work():
+            tmp = tempfile.mkdtemp(prefix="rufix-update-")
+            try:
+                path = updater.download(rel, asset, tmp, progress)
+                cmd = updater.install_command(method, path, tmp)
+                GLib.idle_add(self.update_label.set_text, "Installing...")
+                proc = subprocess.run(cmd, capture_output=True, text=True)
+                out = (proc.stdout + proc.stderr).strip()
+                rc = proc.returncode
+            except (OSError, ValueError) as e:
+                out, rc = str(e), -1
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            GLib.idle_add(self._on_update_installed, rel, rc, out)
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_update_installed(self, rel: updater.Release, rc: int, out: str):
+        self.updating = False
+        self.check_update_btn.set_sensitive(True)
+        if out:
+            self.log(out)
+        if rc == 0:
+            self.latest = None
+            self.install_update_btn.hide()
+            self.update_label.set_text(f"{APP_NAME} {rel.version} was installed. "
+                                       "Restart Rufix to use it.")
+            self.log(f"Update to {rel.version} installed")
+        elif rc in (126, 127):
+            self.update_label.set_text("Update cancelled: authorization was denied.")
+        else:
+            self.update_label.set_text("The update failed. See the log for details.")
+            self.error("The update failed.", (out.splitlines() or ["Unknown error"])[-1])
+        self._update_state()
+        return False
 
     def _setup_dnd(self):
         self.drag_dest_set(Gtk.DestDefaults.ALL, [], Gdk.DragAction.COPY)
@@ -703,7 +874,8 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.target_combo.set_active(0)
 
         ready = self.device is not None and (not bootable or has_image)
-        self.start_btn.set_sensitive(ready and not self.busy)
+        self.start_btn.set_sensitive(ready and not self.busy and not self.updating)
+        self.install_update_btn.set_sensitive(not self.busy and not self.updating)
 
     # ------------------------------------------------------------ dialogs
     def error(self, text: str, secondary: str = ""):

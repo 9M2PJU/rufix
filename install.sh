@@ -35,7 +35,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 
 install -d "$LIB/rufix"
 install -m 644 "$SRC"/rufix/__init__.py "$SRC"/rufix/app.py "$SRC"/rufix/devices.py \
-    "$SRC"/rufix/imageinfo.py "$SRC"/rufix/helper.py "$LIB/rufix/"
+    "$SRC"/rufix/imageinfo.py "$SRC"/rufix/helper.py "$SRC"/rufix/updater.py "$LIB/rufix/"
 # The helper is what pkexec runs; its path must match the polkit policy.
 sed '1s|.*|#!/usr/bin/python3|' "$SRC/rufix/helper.py" > "$LIB/rufix-helper"
 chmod 755 "$LIB/rufix-helper"
