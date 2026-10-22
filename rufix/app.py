@@ -421,6 +421,10 @@ class RufixWindow(Gtk.ApplicationWindow):
         row.pack_start(self.hash_btn, False, False, 0)
         row.pack_start(self.select_btn, False, False, 0)
         main.pack_start(row, False, False, 0)
+        self.file_label = Gtk.Label(xalign=0)
+        self.file_label.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        self.file_label.set_no_show_all(True)
+        main.pack_start(self.file_label, False, False, 0)
 
         self.mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.mode_box.pack_start(field_label("Image option"), False, False, 0)
@@ -928,6 +932,10 @@ class RufixWindow(Gtk.ApplicationWindow):
         has_image = bool(self.image)
         has_file = bool(self.selected_file)
         self.boot_combo.set_tooltip_text(self.selected_file)
+        if has_file:
+            self.file_label.set_text(f"Selected file: '{os.path.basename(self.selected_file)}'")
+            self.file_label.set_tooltip_text(self.selected_file)
+        self.file_label.set_visible(has_file)
         self.select_btn.set_sensitive((bootable or self.extracting) and not self.busy)
         self.hash_btn.set_sensitive(has_file and not self.busy)
         show_mode = bootable and has_image
