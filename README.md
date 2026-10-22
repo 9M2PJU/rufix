@@ -2,9 +2,11 @@
 
 [![AUR version](https://img.shields.io/aur/version/rufix)](https://aur.archlinux.org/packages/rufix)
 
-A Rufus-style USB formatting and bootable-drive tool for Linux, built with
-Python + GTK3. Made for **Linux Mint** (20, 21, 22 / LMDE) and works on
-Ubuntu, Debian, Fedora, openSUSE, Arch and other GTK desktops.
+A Rufus-style USB formatting and bootable-drive tool for **Linux**, built
+with Python + GTK3. It is not tied to any one distribution: it runs on any
+modern Linux desktop, including Ubuntu, Debian, Linux Mint, Pop!_OS,
+Fedora, openSUSE, Arch, Manjaro and their derivatives, under GNOME, KDE
+Plasma, Cinnamon, Xfce, MATE and other desktops.
 
 ## Features
 
@@ -28,6 +30,9 @@ Ubuntu, Debian, Fedora, openSUSE, Arch and other GTK desktops.
 - MD5 / SHA-1 / SHA-256 checksum of the image (`#` button).
 - Drag & drop an image onto the window; open images from the file manager.
 - Progress, speed and time remaining, cancel, and a saveable log.
+- **Settings tab**: remember the last used settings between runs, and check
+  for and install new versions from GitHub (downloads are verified against
+  their published SHA-256 checksum).
 
 ## Install
 
@@ -57,7 +62,22 @@ yay -S rufix
 
 Or manually: `git clone https://aur.archlinux.org/rufix.git && cd rufix && makepkg -si`.
 
-### Linux Mint / Ubuntu / Debian (.deb)
+### Flatpak (any distro)
+
+Download `rufix-<version>-x86_64.flatpak` from the release page, then:
+
+```bash
+flatpak install --user ./rufix-0.1.1-x86_64.flatpak
+flatpak run org.rufix.Rufix
+```
+
+The Flatpak bundles the interface. Formatting still uses your system's
+tools (dosfstools, ntfs-3g, exfatprogs, e2fsprogs, polkit, Python 3), which
+most desktops already have; the root helper runs on the host through
+`pkexec`. Flatpak bundles are built automatically by GitHub Actions on every
+push.
+
+### Debian / Ubuntu / Linux Mint / Pop!_OS (.deb)
 
 ```bash
 sudo apt install ./rufix_0.1.1_all.deb
@@ -88,7 +108,8 @@ chmod +x rufix-0.1.1-x86_64.AppImage
 It bundles Rufix itself and uses your system's Python 3, GTK 3 and
 formatting tools (same requirements as below). The privileged helper runs
 from inside the bundle via `pkexec`, so no system-wide installation is
-needed. (On Mint 20 install `exfat-utils` instead of `exfatprogs`.)
+needed. (On older releases such as Ubuntu 20.04 / Mint 20, install
+`exfat-utils` instead of `exfatprogs`.)
 
 ### Other distributions (tarball)
 
@@ -107,6 +128,7 @@ tar xzf rufix-0.1.1.tar.gz && cd rufix-0.1.1 && sudo ./install.sh
 ./packaging/build-tarball.sh    # dist/rufix-<version>.tar.gz
 ./packaging/build-rpm.sh        # dist/rufix-<version>-1.noarch.rpm (needs rpm-build)
 ./packaging/build-appimage.sh   # dist/rufix-<version>-x86_64.AppImage (needs appimagetool)
+./packaging/build-flatpak.sh    # dist/rufix-<version>-x86_64.flatpak (needs flatpak-builder)
 cd packaging/arch && makepkg -si   # Arch Linux package
 ```
 

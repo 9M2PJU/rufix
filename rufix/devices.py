@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import configparser
 import json
+import os
 import subprocess
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -12,6 +14,23 @@ SYSTEM_MOUNTS = {"/", "/boot", "/boot/efi", "/efi", "/home", "/usr", "/var", "[S
 
 _COLUMNS_NEW = "NAME,PATH,SIZE,TYPE,TRAN,RM,HOTPLUG,MODEL,VENDOR,LABEL,MOUNTPOINTS,FSTYPE"
 _COLUMNS_OLD = "NAME,PATH,SIZE,TYPE,TRAN,RM,HOTPLUG,MODEL,VENDOR,LABEL,MOUNTPOINT,FSTYPE"
+
+
+FLATPAK = os.path.exists("/.flatpak-info")
+
+
+def host_command(cmd: List[str]) -> List[str]:
+    """Run cmd on the host when inside the Flatpak sandbox (lsblk, udisksctl, pkexec...)."""
+    return ["flatpak-spawn", "--host"] + cmd if FLATPAK else cmd
+
+
+def host_path(path: str) -> str:
+    """Translate a sandbox /app path to where the host sees it."""
+    if not FLATPAK or not path.startswith("/app/"):
+        return path
+    info = configparser.ConfigParser()
+    info.read("/.flatpak-info")
+    return info.get("Instance", "app-path", fallback="/app") + path[len("/app"):]
 
 
 def _flag(value) -> bool:
@@ -102,7 +121,7 @@ def _run_lsblk() -> dict:
     for cols in (_COLUMNS_NEW, _COLUMNS_OLD):
         try:
             out = subprocess.run(
-                ["lsblk", "-J", "-b", "-o", cols],
+                host_command(["lsblk", "-J", "-b", "-o", cols]),
                 check=True, capture_output=True, text=True,
             ).stdout
             return json.loads(out)
@@ -118,7 +137,8 @@ def _strip(v) -> str:
 def mountable_volumes(dev_path: str) -> List[str]:
     """Unmounted partitions (or the bare disk) on dev_path that hold a file system."""
     for col in ("MOUNTPOINTS", "MOUNTPOINT"):
-        proc = subprocess.run(["lsblk", "-J", "-o", f"PATH,TYPE,FSTYPE,{col}", dev_path],
+        proc = subprocess.run(host_command(["lsblk", "-J", "-o", f"PATH,TYPE,FSTYPE,{col}",
+                                            dev_path]),
                               capture_output=True, text=True)
         if proc.returncode == 0:
             break

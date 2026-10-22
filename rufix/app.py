@@ -21,7 +21,8 @@ gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
 
 from . import APP_ID, APP_NAME, __version__, updater  # noqa: E402
-from .devices import Device, human_size, list_devices, mountable_volumes  # noqa: E402
+from .devices import (FLATPAK, Device, host_command, host_path, human_size,  # noqa: E402
+                      list_devices, mountable_volumes)
 from .imageinfo import ImageInfo, inspect  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -82,6 +83,10 @@ def field_label(text: str) -> Gtk.Label:
 
 
 def helper_command() -> List[str]:
+    if FLATPAK:
+        # The helper needs the host's formatting tools and raw device access,
+        # so it runs outside the sandbox with the host's Python.
+        return host_command(["pkexec", "/usr/bin/python3", host_path(SOURCE_HELPER)])
     if os.path.exists(INSTALLED_HELPER):
         helper = [INSTALLED_HELPER]
     else:
@@ -608,6 +613,8 @@ class RufixWindow(Gtk.ApplicationWindow):
                            "(for example 'yay -Syu' or 'sudo dnf upgrade').",
                 "manual": "This copy of Rufix runs from source or an AppImage, so it cannot "
                           "replace itself.",
+                "flatpak": "Download the new .flatpak bundle and install it with "
+                           "'flatpak install --user'.",
             }.get(method, "No installable package for this system was found in the release.")
             self.update_label.set_text(hint + " Opening the download page...")
             Gtk.show_uri_on_window(self, rel.url, Gdk.CURRENT_TIME)
@@ -1091,7 +1098,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         automounts on hotplug, so without this the drive vanishes from the file
         manager until it is unplugged and reinserted.
         """
-        subprocess.run(["udevadm", "settle", "--timeout=10"], capture_output=True)
+        subprocess.run(host_command(["udevadm", "settle", "--timeout=10"]), capture_output=True)
         volumes: List[str] = []
         for _ in range(10):
             volumes = mountable_volumes(dev_path)
@@ -1100,8 +1107,9 @@ class RufixWindow(Gtk.ApplicationWindow):
             time.sleep(0.5)
         for vol in volumes:
             for attempt in range(5):
-                proc = subprocess.run(["udisksctl", "mount", "-b", vol, "--no-user-interaction"],
-                                      capture_output=True, text=True)
+                proc = subprocess.run(
+                    host_command(["udisksctl", "mount", "-b", vol, "--no-user-interaction"]),
+                    capture_output=True, text=True)
                 if proc.returncode == 0:
                     GLib.idle_add(self.log, proc.stdout.strip())
                     break

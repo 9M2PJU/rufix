@@ -84,8 +84,11 @@ def install_method() -> str:
     "deb"     - Debian package, can be upgraded with apt
     "tarball" - install.sh into /usr/lib/rufix, can be upgraded the same way
     "package" - owned by another package manager (rpm, pacman/AUR)
+    "flatpak" - Flatpak bundle; the user installs the new bundle
     "manual"  - running from source or an AppImage; the user updates it
     """
+    if os.path.exists("/.flatpak-info"):
+        return "flatpak"
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if os.environ.get("APPIMAGE") or here != INSTALL_DIR:
         return "manual"

@@ -1,0 +1,38 @@
+# Flatpak manifest. Build with ./packaging/build-flatpak.sh
+# The sandboxed GUI runs lsblk/udisksctl and the pkexec root helper on the
+# host through flatpak-spawn, so the host needs the formatting tools, polkit
+# and Python 3 (as with every other Rufix package).
+app-id: org.rufix.Rufix
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: rufix
+finish-args:
+  - --share=ipc
+  - --socket=fallback-x11
+  - --socket=wayland
+  # Update checks against GitHub releases.
+  - --share=network
+  # Image files must be readable by the host-side root helper at their real paths.
+  - --filesystem=host
+  # flatpak-spawn --host for lsblk, udisksctl and pkexec.
+  - --talk-name=org.freedesktop.Flatpak
+modules:
+  - name: rufix
+    buildsystem: simple
+    build-commands:
+      - install -d /app/lib/rufix/rufix /app/lib/rufix/data
+      - install -m 644 rufix/*.py /app/lib/rufix/rufix/
+      - install -m 644 data/rufix.svg /app/lib/rufix/data/
+      - sed 's|/usr/lib/rufix|/app/lib/rufix|' data/rufix-launcher > rufix-launcher
+      - install -Dm755 rufix-launcher /app/bin/rufix
+      - install -Dm644 data/rufix.desktop /app/share/applications/org.rufix.Rufix.desktop
+      - desktop-file-edit --set-icon=org.rufix.Rufix /app/share/applications/org.rufix.Rufix.desktop
+      - install -Dm644 data/rufix.svg /app/share/icons/hicolor/scalable/apps/org.rufix.Rufix.svg
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - .git
+          - .flatpak-builder
+          - dist
