@@ -25,6 +25,7 @@ from .imageinfo import ImageInfo, inspect  # noqa: E402
 HERE = os.path.dirname(os.path.abspath(__file__))
 INSTALLED_HELPER = "/usr/lib/rufix/rufix-helper"
 SOURCE_HELPER = os.path.join(HERE, "helper.py")
+SETTINGS_FILE = os.path.join(GLib.get_user_config_dir(), "rufix", "settings.json")
 
 FS_LABELS = {
     "fat32": "FAT32",
@@ -84,6 +85,26 @@ def helper_command() -> List[str]:
     if os.geteuid() == 0:
         return helper
     return ["pkexec"] + helper
+
+
+def load_settings() -> dict:
+    try:
+        with open(SETTINGS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_settings(data: dict):
+    try:
+        os.makedirs(os.path.dirname(SETTINGS_FILE), exist_ok=True)
+        tmp = SETTINGS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, SETTINGS_FILE)
+    except OSError:
+        pass
 
 
 class LogWindow(Gtk.Window):
@@ -209,8 +230,9 @@ class ChecksumDialog(Gtk.Dialog):
 class WindowsOptionsDialog(Gtk.Dialog):
     """Rufus' 'Windows User Experience' dialog."""
 
-    def __init__(self, parent: Gtk.Window):
+    def __init__(self, parent: Gtk.Window, defaults: Optional[dict] = None):
         super().__init__(title="Windows User Experience", transient_for=parent, modal=True)
+        defaults = defaults or {}
         self.add_button("_Cancel", Gtk.ResponseType.CANCEL)
         self.add_button("_OK", Gtk.ResponseType.OK)
         self.set_default_response(Gtk.ResponseType.OK)
@@ -223,8 +245,9 @@ class WindowsOptionsDialog(Gtk.Dialog):
         self.msa = Gtk.CheckButton(
             label="Remove requirement for an online Microsoft account")
         self.tele = Gtk.CheckButton(label="Disable data collection (Skip privacy questions)")
-        self.hw.set_active(True)
-        self.msa.set_active(True)
+        self.hw.set_active(defaults.get("bypass_hw", True))
+        self.msa.set_active(defaults.get("bypass_msa", True))
+        self.tele.set_active(defaults.get("no_telemetry", False))
         for w in (self.hw, self.msa, self.tele):
             area.add(w)
         self.show_all()
@@ -253,7 +276,9 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.busy = False
         self.start_time = 0.0
         self.got_done = False
-        self.last_dir = os.path.expanduser("~/Downloads")
+        self.settings = load_settings()
+        self.last_dir = self.settings.get("last_dir") or os.path.expanduser("~/Downloads")
+        self.win_opts = self.settings.get("win_opts") or {}
         self.log_window = LogWindow(self)
 
         provider = Gtk.CssProvider()
@@ -267,7 +292,54 @@ class RufixWindow(Gtk.ApplicationWindow):
 
         self.log(f"{APP_NAME} {__version__} started")
         self.refresh_devices(force=True)
+        self._restore_settings()
         GLib.timeout_add_seconds(2, self._poll_devices)
+
+    # ------------------------------------------------------------ settings
+    def _restore_settings(self):
+        s = self.settings
+        # Each setter fires "changed" handlers that repopulate later widgets,
+        # so restore in dependency order: image -> mode -> fs -> cluster.
+        self.usb_hdd_check.set_active(s.get("usb_hdd", False))
+        self.verify_check.set_active(s.get("verify", True))
+        self.quick_check.set_active(s.get("quick", True))
+        self.bb_check.set_active(s.get("badblocks", False))
+        self.bb_combo.set_active_id(str(s.get("badblocks_passes", 1)))
+        image = s.get("image")
+        if s.get("boot") == "none":
+            self.boot_combo.set_active_id("none")
+        elif image and os.path.isfile(image):
+            self.load_image(image)
+        if s.get("mode"):
+            self.mode_combo.set_active_id(s["mode"])
+        if s.get("scheme"):
+            self.scheme_combo.set_active_id(s["scheme"])
+        self._update_state()
+        if s.get("filesystem"):
+            self.fs_combo.set_active_id(s["filesystem"])
+        if s.get("cluster") is not None:
+            self.cluster_combo.set_active_id(str(s["cluster"]))
+        if s.get("label") is not None:
+            self.label_entry.set_text(s["label"])
+        self._update_state()
+
+    def _save_settings(self):
+        save_settings({
+            "boot": self.boot_combo.get_active_id(),
+            "image": self.image.path if self.image else None,
+            "last_dir": self.last_dir,
+            "mode": self.mode_combo.get_active_id(),
+            "scheme": self.scheme_combo.get_active_id(),
+            "filesystem": self.fs_combo.get_active_id(),
+            "cluster": int(self.cluster_combo.get_active_id() or 0),
+            "label": self.label_entry.get_text(),
+            "usb_hdd": self.usb_hdd_check.get_active(),
+            "verify": self.verify_check.get_active(),
+            "quick": self.quick_check.get_active(),
+            "badblocks": self.bb_check.get_active(),
+            "badblocks_passes": int(self.bb_combo.get_active_id() or 1),
+            "win_opts": self.win_opts,
+        })
 
     # ------------------------------------------------------------------ UI
     def _build(self):
@@ -691,12 +763,13 @@ class RufixWindow(Gtk.ApplicationWindow):
                            f"{human_size(dev.size)}.")
                 return None
             if self.mode == "iso" and img.is_windows:
-                dlg = WindowsOptionsDialog(self)
+                dlg = WindowsOptionsDialog(self, self.win_opts)
                 resp = dlg.run()
                 job["win_opts"] = dlg.options()
                 dlg.destroy()
                 if resp != Gtk.ResponseType.OK:
                     return None
+                self.win_opts = job["win_opts"]
         return job
 
     def _on_start(self, *_):
@@ -720,6 +793,7 @@ class RufixWindow(Gtk.ApplicationWindow):
                                 "and can take several hours on large drives. Continue?",
                                 Gtk.MessageType.QUESTION):
                 return
+        self._save_settings()
         self._run_job(job)
 
     def _run_job(self, job: dict):
@@ -898,6 +972,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         if self.busy:
             self._cancel()
             return True
+        self._save_settings()
         return False
 
 
