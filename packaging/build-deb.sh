@@ -17,7 +17,8 @@ Section: utils
 Priority: optional
 Architecture: all
 Depends: python3 (>= 3.6), python3-gi, gir1.2-gtk-3.0, util-linux, fdisk | util-linux (<< 2.29.2-3~), dosfstools, e2fsprogs, ntfs-3g, exfatprogs | exfat-utils, pkexec | policykit-1, udev
-Recommends: wimtools
+Recommends: wimtools, 7zip | p7zip-full
+Suggests: unrar
 Maintainer: Rufix <rufix@localhost>
 Description: Create bootable USB drives and format USB keys
  A Rufus-style GTK utility for Linux. Formats USB flash drives (FAT32,

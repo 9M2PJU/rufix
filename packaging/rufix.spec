@@ -23,6 +23,8 @@ Recommends:     parted
 # Provides wimlib-imagex, used to split Windows install.wim files over 4 GB.
 # (Debian/Ubuntu name: wimtools.)
 Recommends:     wimlib
+# Extracts 7z and RAR files in "Compressed file" mode (zip/tar need nothing extra).
+Recommends:     (7zip or p7zip)
 
 %description
 A Rufus-style USB formatting and bootable-drive tool for Linux, built with

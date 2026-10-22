@@ -10,7 +10,8 @@ depends=('python' 'python-gobject' 'gtk3' 'polkit'
          'dosfstools' 'e2fsprogs' 'exfatprogs' 'ntfs-3g'
          'util-linux' 'systemd')
 optdepends=('wimlib: split Windows install.wim images larger than 4 GB for FAT32 drives'
-            'parted: re-read partition tables via partprobe')
+            'parted: re-read partition tables via partprobe'
+            '7zip: extract 7z and RAR files in Compressed file mode')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/thuutien/rufix/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
 sha256sums=('9315a4f664f93bafc24d89e3a0579817854959bff3bdee367371178722a1ff4d')
 

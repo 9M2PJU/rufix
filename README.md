@@ -27,7 +27,13 @@ Plasma, Cinnamon, Xfce, MATE and other desktops.
   - Rufus-style *Windows User Experience* options: skip TPM 2.0 / Secure
     Boot / 4GB RAM checks, skip the online Microsoft account, skip privacy
     questions (via `autounattend.xml`).
-- MD5 / SHA-1 / SHA-256 checksum of the image (`#` button).
+- **Compressed file**: format the drive, then extract a `.zip`, `.7z`,
+  `.rar` or `.tar.*` archive onto it. Zip and tar work out of the box; 7z
+  and RAR need 7-Zip (`7zip` or `p7zip-full`; `unrar` also works for RAR).
+  The archive is checked before anything is erased: files over 4 GB on
+  FAT32, archives too big for the drive and unsafe paths are refused.
+  Extraction runs with your own user rights, not as root.
+- MD5 / SHA-1 / SHA-256 checksum of the selected file (`#` button).
 - Drag & drop an image onto the window; open images from the file manager.
 - Progress, speed and time remaining, cancel, and a saveable log.
 - **Settings tab**: remember the last used settings between runs, and check

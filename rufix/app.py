@@ -40,6 +40,15 @@ FS_LABELS = {
     "ext4": "ext4",
 }
 
+ARCHIVE_PATTERNS = ("*.zip", "*.7z", "*.rar", "*.tar", "*.tar.gz", "*.tgz", "*.tar.xz",
+                    "*.txz", "*.tar.bz2", "*.tbz2", "*.tar.zst")
+ARCHIVE_SUFFIXES = tuple(p[1:] for p in ARCHIVE_PATTERNS)
+
+
+def is_archive_name(path: str) -> bool:
+    return path.lower().endswith(ARCHIVE_SUFFIXES)
+
+
 K = 1024
 CLUSTERS = {
     "fat32": [512, 1 * K, 2 * K, 4 * K, 8 * K, 16 * K, 32 * K, 64 * K],
@@ -281,6 +290,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.devices: List[Device] = []
         self.device_sig = None
         self.image: Optional[ImageInfo] = None
+        self.archive: Optional[str] = None
         self.proc: Optional[subprocess.Popen] = None
         self.busy = False
         self.start_time = 0.0
@@ -322,8 +332,14 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.bb_check.set_active(s.get("badblocks", False))
         self.bb_combo.set_active_id(str(s.get("badblocks_passes", 1)))
         image = s.get("image")
+        archive = s.get("archive")
         if s.get("boot") == "none":
             self.boot_combo.set_active_id("none")
+        elif s.get("boot") == "archive":
+            if archive and os.path.isfile(archive):
+                self.load_archive(archive)
+            else:
+                self.boot_combo.set_active_id("archive")
         elif image and os.path.isfile(image):
             self.load_image(image)
         if s.get("mode"):
@@ -351,6 +367,7 @@ class RufixWindow(Gtk.ApplicationWindow):
             **prefs,
             "boot": self.boot_combo.get_active_id(),
             "image": self.image.path if self.image else None,
+            "archive": self.archive,
             "last_dir": self.last_dir,
             "mode": self.mode_combo.get_active_id(),
             "scheme": self.scheme_combo.get_active_id(),
@@ -388,11 +405,12 @@ class RufixWindow(Gtk.ApplicationWindow):
         row = Gtk.Box(spacing=6)
         self.boot_combo = Gtk.ComboBoxText()
         self.boot_combo.append("image", "Disk or ISO image (Please select)")
+        self.boot_combo.append("archive", "Compressed file - extract to drive (Please select)")
         self.boot_combo.append("none", "Non bootable")
         self.boot_combo.set_active_id("image")
         self.boot_combo.connect("changed", lambda *_: self._update_state())
         self.hash_btn = Gtk.Button(label="#")
-        self.hash_btn.set_tooltip_text("Compute image checksums (MD5, SHA-1, SHA-256)")
+        self.hash_btn.set_tooltip_text("Compute file checksums (MD5, SHA-1, SHA-256)")
         self.hash_btn.connect("clicked", self._on_hash)
         self.select_btn = Gtk.Button(label="SELECT")
         self.select_btn.connect("clicked", self._on_select_image)
@@ -693,7 +711,21 @@ class RufixWindow(Gtk.ApplicationWindow):
         return self.boot_combo.get_active_id() == "image"
 
     @property
+    def extracting(self) -> bool:
+        return self.boot_combo.get_active_id() == "archive"
+
+    @property
+    def selected_file(self) -> Optional[str]:
+        if self.bootable:
+            return self.image.path if self.image else None
+        if self.extracting:
+            return self.archive
+        return None
+
+    @property
     def mode(self) -> str:
+        if self.extracting:
+            return "extract"
         if not self.bootable:
             return "format"
         return self.mode_combo.get_active_id() or "dd"
@@ -734,13 +766,21 @@ class RufixWindow(Gtk.ApplicationWindow):
 
     # ------------------------------------------------------------ image
     def _on_select_image(self, *_):
-        dlg = Gtk.FileChooserNative(title="Select disk image", transient_for=self,
-                                    action=Gtk.FileChooserAction.OPEN)
+        archive = self.extracting
+        dlg = Gtk.FileChooserNative(
+            title="Select compressed file" if archive else "Select disk image",
+            transient_for=self, action=Gtk.FileChooserAction.OPEN)
         flt = Gtk.FileFilter()
-        flt.set_name("Disk images (*.iso, *.img, *.img.xz, ...)")
-        for pat in ("*.iso", "*.ISO", "*.img", "*.IMG", "*.raw", "*.bin", "*.img.xz",
-                    "*.img.gz", "*.img.bz2", "*.xz", "*.gz", "*.bz2"):
+        if archive:
+            flt.set_name("Compressed files (*.zip, *.7z, *.rar, *.tar.gz, ...)")
+            patterns = ARCHIVE_PATTERNS
+        else:
+            flt.set_name("Disk images (*.iso, *.img, *.img.xz, ...)")
+            patterns = ("*.iso", "*.img", "*.raw", "*.bin", "*.img.xz",
+                        "*.img.gz", "*.img.bz2", "*.xz", "*.gz", "*.bz2")
+        for pat in patterns:
             flt.add_pattern(pat)
+            flt.add_pattern(pat.upper())
         dlg.add_filter(flt)
         all_f = Gtk.FileFilter()
         all_f.set_name("All files")
@@ -749,7 +789,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         if os.path.isdir(self.last_dir):
             dlg.set_current_folder(self.last_dir)
         if dlg.run() == Gtk.ResponseType.ACCEPT:
-            self.load_image(dlg.get_filename())
+            (self.load_archive if archive else self.load_image)(dlg.get_filename())
         dlg.destroy()
 
     def _on_drop(self, _w, _ctx, _x, _y, data, _info, _time):
@@ -757,7 +797,37 @@ class RufixWindow(Gtk.ApplicationWindow):
         if uris:
             path = unquote(urlparse(uris[0]).path)
             if os.path.isfile(path):
-                self.load_image(path)
+                self.open_file(path)
+
+    def open_file(self, path: str):
+        """Open a dropped or command-line file as an archive or a disk image."""
+        if is_archive_name(path):
+            self.load_archive(path)
+        else:
+            self.load_image(path)
+
+    def _set_boot_text(self, boot_id: str, text: str):
+        model = self.boot_combo.get_model()
+        for i, row in enumerate(model):
+            if row[1] == boot_id:
+                self.boot_combo.remove(i)
+                self.boot_combo.insert(i, boot_id, text)
+                break
+        self.boot_combo.set_active_id(boot_id)
+
+    def load_archive(self, path: str):
+        try:
+            size = os.path.getsize(path)
+        except OSError as e:
+            self.error(f"Cannot read file: {e}")
+            return
+        self.archive = path
+        self.last_dir = os.path.dirname(path)
+        self._set_boot_text("archive", os.path.basename(path))
+        self.log(f"Selected compressed file: {path} ({human_size(size)})")
+        self.set_status(f"Will extract: {os.path.basename(path)}")
+        self._populate_fs()
+        self._update_state()
 
     def load_image(self, path: str):
         try:
@@ -770,9 +840,7 @@ class RufixWindow(Gtk.ApplicationWindow):
             return
         self.image = info
         self.last_dir = os.path.dirname(path)
-        self.boot_combo.remove(0)
-        self.boot_combo.insert(0, "image", info.filename)
-        self.boot_combo.set_active_id("image")
+        self._set_boot_text("image", info.filename)
         self.log(f"Selected image: {path} ({human_size(info.size)}), kind={info.kind}, "
                  f"label='{info.label}', hybrid={info.is_hybrid}, windows={info.is_windows}, "
                  f"efi={info.has_efi}, bios={info.has_bios}")
@@ -796,12 +864,12 @@ class RufixWindow(Gtk.ApplicationWindow):
         self._update_state()
 
     def _on_hash(self, *_):
-        if self.image:
-            ChecksumDialog(self, self.image.path)
+        if self.selected_file:
+            ChecksumDialog(self, self.selected_file)
 
     # ------------------------------------------------------------ fs / state
     def _fs_choices(self) -> List[str]:
-        if self.mode == "format":
+        if self.mode in ("format", "extract"):
             dev = self.device
             choices = ["fat32", "exfat", "ntfs", "ext4"]
             if dev and dev.size <= 4 * 1024 ** 3:
@@ -824,7 +892,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         elif choices:
             dev = self.device
             default = "fat32"
-            if self.mode == "format" and dev and dev.size > 32 * 1000 ** 3:
+            if self.mode in ("format", "extract") and dev and dev.size > 32 * 1000 ** 3:
                 default = "exfat"
             self.fs_combo.set_active_id(default)
 
@@ -854,8 +922,9 @@ class RufixWindow(Gtk.ApplicationWindow):
             return
         bootable = self.bootable
         has_image = bool(self.image)
-        self.select_btn.set_sensitive(bootable and not self.busy)
-        self.hash_btn.set_sensitive(bootable and has_image and not self.busy)
+        has_file = bool(self.selected_file)
+        self.select_btn.set_sensitive((bootable or self.extracting) and not self.busy)
+        self.hash_btn.set_sensitive(has_file and not self.busy)
         show_mode = bootable and has_image
         self.mode_box.set_visible(show_mode)
 
@@ -865,8 +934,9 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.scheme_combo.set_sensitive(not dd and not self.busy)
         self.label_entry.set_sensitive(not dd and not self.busy)
         self.fs_combo.set_sensitive(not dd and not self.busy)
-        self.cluster_combo.set_sensitive(not dd and not self.busy and mode == "format")
-        self.quick_check.set_sensitive(mode == "format" and not self.busy)
+        formats = mode in ("format", "extract")
+        self.cluster_combo.set_sensitive(formats and not self.busy)
+        self.quick_check.set_sensitive(formats and not self.busy)
         self.verify_check.set_sensitive(not self.busy)
         self.bb_combo.set_sensitive(self.bb_check.get_active() and not self.busy)
 
@@ -880,7 +950,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.target_combo.append("t", target)
         self.target_combo.set_active(0)
 
-        ready = self.device is not None and (not bootable or has_image)
+        ready = self.device is not None and (has_file or not (bootable or self.extracting))
         self.start_btn.set_sensitive(ready and not self.busy and not self.updating)
         self.install_update_btn.set_sensitive(not self.busy and not self.updating)
 
@@ -929,6 +999,11 @@ class RufixWindow(Gtk.ApplicationWindow):
             "badblocks": int(self.bb_combo.get_active_id()) if self.bb_check.get_active() else 0,
             "verify": self.verify_check.get_active(),
         }
+        if self.mode == "extract":
+            if not os.path.isfile(self.archive or ""):
+                self.error("The selected compressed file no longer exists.")
+                return None
+            job["archive"] = self.archive
         if self.mode in ("dd", "iso"):
             img = self.image
             if not os.path.exists(img.path):
@@ -1170,7 +1245,7 @@ class RufixApp(Gtk.Application):
     def do_open(self, files, n_files, hint):
         self.do_activate()
         if files and files[0].get_path():
-            self.window.load_image(files[0].get_path())
+            self.window.open_file(files[0].get_path())
 
 
 def main():

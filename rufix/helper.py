@@ -13,6 +13,9 @@ of stdin, performs it, and reports progress as JSON lines on stdout:
     {"t": "progress", "p": 0.42}      - fraction done (-1 = indeterminate)
     {"t": "done", "ok": true, "m": ""} - final result
 
+Actions: "format", "dd" (raw image write), "iso" (ISO file copy) and
+"extract" (format, then unpack a zip/7z/rar/tar archive onto the drive).
+
 Any further line on stdin (or stdin closing) cancels the running job.
 
 This file is intentionally self-contained (standard library only) so that it
@@ -25,15 +28,18 @@ import hashlib
 import json
 import lzma
 import os
+import pwd
 import re
 import shutil
 import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
+import zipfile
 
 os.environ["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 os.environ["LC_ALL"] = "C"
@@ -791,6 +797,279 @@ def write_iso_mode(job, dev, dev_size, workdir):
 
 
 # --------------------------------------------------------------------------
+# Compressed file (archive) mode
+# --------------------------------------------------------------------------
+# Archives are untrusted input, so listing and extracting run in a forked child
+# that has dropped root and runs as the user who started Rufix. A crafted
+# archive can then at worst write what that user could write anyway.
+
+ARCHIVE_TOOLS = ("7zz", "7z", "7za", "unrar", "bsdtar")
+# Characters FAT and exFAT cannot store in file names.
+FAT_BAD_CHARS = re.compile(r'[<>:"\\|?*\x00-\x1f]')
+
+
+def invoking_user():
+    uid = int(os.environ.get("PKEXEC_UID") or os.environ.get("SUDO_UID") or 0)
+    try:
+        gid = pwd.getpwuid(uid).pw_gid
+    except KeyError:
+        gid = uid
+    return uid, gid
+
+
+def as_user(fn, *args):
+    """Run fn(*args) in a child process with the invoking user's privileges.
+
+    The child may emit progress messages itself; its JSON-serialisable return
+    value is passed back through a pipe. Cancelling kills the child and any
+    tool it started.
+    """
+    uid, gid = invoking_user()
+    r, w = os.pipe()
+    pid = os.fork()
+    if pid == 0:
+        os.close(r)
+        try:
+            os.setpgid(0, 0)
+            if uid:
+                os.setgroups([])
+                os.setgid(gid)
+                os.setuid(uid)
+            res = {"ok": True, "v": fn(*args)}
+        except BaseException as e:  # noqa: BLE001 - report everything to the parent
+            res = {"ok": False, "m": str(e) or e.__class__.__name__}
+        try:
+            with os.fdopen(w, "w") as f:
+                json.dump(res, f)
+        finally:
+            os._exit(0)
+    os.close(w)
+    try:
+        while True:
+            done, _ = os.waitpid(pid, os.WNOHANG)
+            if done:
+                break
+            if cancel_event.is_set():
+                try:
+                    os.killpg(pid, signal.SIGKILL)
+                except OSError:
+                    pass
+                os.waitpid(pid, 0)
+                raise Cancelled()
+            time.sleep(0.2)
+        with os.fdopen(r, "r") as f:
+            r = None
+            data = f.read()
+    finally:
+        if r is not None:
+            os.close(r)
+    res = json.loads(data) if data else {"ok": False, "m": "Archive process exited unexpectedly"}
+    if not res.get("ok"):
+        raise JobError(res.get("m") or "Archive processing failed")
+    return res["v"]
+
+
+def safe_rel(name, fat_names=False):
+    """Archive member name -> safe relative path, or None if it escapes the target."""
+    parts = [p for p in name.replace("\\", "/").split("/") if p not in ("", ".")]
+    if not parts or ".." in parts:
+        return None
+    if fat_names:
+        parts = [FAT_BAD_CHARS.sub("_", p).rstrip(" .") or "_" for p in parts]
+    return os.path.join(*parts)
+
+
+def archive_kind(path):
+    if zipfile.is_zipfile(path):
+        return "zip"
+    try:
+        if tarfile.is_tarfile(path):
+            return "tar"
+    except (OSError, tarfile.TarError):
+        pass
+    return "external"
+
+
+def _list_7z(tool, path):
+    proc = subprocess.run([tool, "l", "-slt", "-ba", path], capture_output=True, text=True,
+                          errors="replace", stdin=subprocess.DEVNULL)
+    if proc.returncode != 0:
+        return None
+    entries, cur = [], {}
+    for line in proc.stdout.splitlines() + [""]:
+        if not line.strip():
+            if "Path" in cur:
+                entries.append(cur)
+            cur = {}
+        elif " = " in line:
+            k, v = line.split(" = ", 1)
+            cur[k.strip()] = v
+    return [(e["Path"], int(e.get("Size") or 0), e.get("Attributes", "").startswith("D")
+             or e.get("Folder") == "+") for e in entries]
+
+
+def list_archive(path):
+    """Runs as the user. Returns total/largest size, file count and the tool to use."""
+    kind = archive_kind(path)
+    entries = []  # (name, size, is_dir)
+    tool = None
+    if kind == "zip":
+        with zipfile.ZipFile(path) as z:
+            for i in z.infolist():
+                if i.flag_bits & 0x1:
+                    raise JobError("Password-protected archives are not supported")
+                entries.append((i.filename, i.file_size, i.is_dir()))
+    elif kind == "tar":
+        with tarfile.open(path) as t:
+            entries = [(m.name, m.size if m.isfile() else 0, m.isdir()) for m in t.getmembers()
+                       if m.isfile() or m.isdir()]
+    else:
+        tried = []
+        for name in ARCHIVE_TOOLS:
+            if not have(name) or (name == "unrar" and not path.lower().endswith(".rar")):
+                continue
+            tried.append(name)
+            if name in ("7zz", "7z", "7za"):
+                listed = _list_7z(name, path)
+                if listed is not None:
+                    tool, entries = name, listed
+                    break
+            else:
+                tool = name  # no size listing; checked by free space while extracting
+                break
+        if not tool and tried:
+            raise JobError(f"This file is not a valid or supported archive "
+                           f"({', '.join(tried)} could not open it).")
+        if not tool:
+            raise JobError("Cannot open this archive. Install 7-Zip to extract 7z and RAR "
+                           "files (sudo apt install 7zip, or p7zip-full + unrar).")
+    files = [(n, s) for n, s, d in entries if not d]
+    unsafe = [n for n, _, _ in entries if safe_rel(n) is None]
+    return {"kind": kind, "tool": tool, "count": len(files),
+            "total": sum(s for _, s in files) if (kind != "external" or entries) else None,
+            "largest": max((s for _, s in files), default=0), "unsafe": unsafe[:5]}
+
+
+def _extract_stream(members, open_member, dest, total, fat_names):
+    """members: list of (name, size, is_dir, handle)."""
+    done = 0
+    last = 0
+    start = time.time()
+    for name, size, is_dir, handle in members:
+        rel = safe_rel(name, fat_names)
+        if rel is None:
+            continue
+        target = os.path.join(dest, rel)
+        if is_dir:
+            os.makedirs(target, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open_member(handle) as fi, open(target, "wb") as fo:
+            while True:
+                data = fi.read(CHUNK)
+                if not data:
+                    break
+                fo.write(data)
+                done += len(data)
+                if total and done - last >= 16 * MiB:
+                    last = done
+                    report_rate("Extracting", min(done, total), total, start)
+
+
+def _extract_external(tool, path, dest, total):
+    if tool in ("7zz", "7z", "7za"):
+        cmd = [tool, "x", "-y", "-bd", f"-o{dest}", path]
+    elif tool == "unrar":
+        cmd = ["unrar", "x", "-o+", "-y", path, dest + "/"]
+    else:
+        cmd = ["bsdtar", "-x", "-f", path, "-C", dest]
+    log("$ " + " ".join(cmd))
+    used0 = shutil.disk_usage(dest).used
+    start = time.time()
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            stdin=subprocess.DEVNULL, text=True, errors="replace")
+    out = []
+    reader = threading.Thread(target=lambda: out.extend(proc.stdout), daemon=True)
+    reader.start()
+    while proc.poll() is None:
+        time.sleep(0.5)
+        if total:
+            done = max(0, shutil.disk_usage(dest).used - used0)
+            report_rate("Extracting", min(done, total), total, start)
+        else:
+            progress(-1)
+    reader.join(timeout=5)
+    for line in [x.rstrip() for x in out if x.strip()][-15:]:
+        log("  " + line)
+    if proc.returncode != 0:
+        raise JobError(f"{tool} failed to extract the archive (exit code {proc.returncode})")
+
+
+def extract_archive(path, dest, info, fat_names):
+    """Runs as the user."""
+    status("Extracting...")
+    progress(0 if info["total"] else -1)
+    if info["kind"] == "zip":
+        with zipfile.ZipFile(path) as z:
+            members = [(i.filename, i.file_size, i.is_dir(), i) for i in z.infolist()
+                       if not stat.S_ISLNK(i.external_attr >> 16)]
+            _extract_stream(members, z.open, dest, info["total"], fat_names)
+    elif info["kind"] == "tar":
+        with tarfile.open(path) as t:
+            members = [(m.name, m.size, m.isdir(), m) for m in t.getmembers()
+                       if m.isfile() or m.isdir()]
+            _extract_stream(members, t.extractfile, dest, info["total"], fat_names)
+    else:
+        _extract_external(info["tool"], path, dest, info["total"])
+    return True
+
+
+def job_extract(job, dev, dev_size, workdir):
+    archive = job["archive"]
+    fs = job["filesystem"]
+    status("Reading archive...")
+    progress(-1)
+    info = as_user(list_archive, archive)
+    log(f"Archive: {info['kind']} ({info['tool'] or 'built-in'}), {info['count']} files, "
+        + (f"{info['total'] / MiB:.0f} MiB uncompressed" if info["total"] is not None
+           else "uncompressed size unknown"))
+    # Check everything that can fail before the drive is wiped.
+    if info["unsafe"]:
+        raise JobError("The archive contains unsafe paths (absolute or '..'): "
+                       + ", ".join(info["unsafe"]))
+    if fs in ("fat32", "fat16") and info["largest"] > FAT32_MAX_FILE:
+        raise JobError("The archive contains files larger than 4 GB, which FAT32 cannot "
+                       "store. Choose exFAT or NTFS instead.")
+    if info["total"] and info["total"] > dev_size - 64 * MiB:
+        raise JobError(f"The extracted files ({info['total'] / MiB:.0f} MiB) do not fit "
+                       "on this device")
+
+    job_format(job, dev, dev_size)
+    part = part_path(dev, 1)
+    dest = os.path.join(workdir, "usb")
+    os.makedirs(dest)
+    uid, gid = invoking_user()
+    if fs == "ntfs":
+        ok = run(["mount", "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid}", part, dest],
+                 check=False).returncode == 0
+        if not ok:
+            run(["mount", "-o", f"uid={uid},gid={gid}", part, dest])
+    elif fs == "ext4":
+        run(["mount", part, dest])
+        os.chown(dest, uid, gid)
+    else:
+        run(["mount", "-o", f"uid={uid},gid={gid},umask=022", part, dest])
+    try:
+        as_user(extract_archive, archive, dest, info, fs in ("fat32", "fat16", "exfat"))
+        status("Flushing buffers to device (this can take a while)...")
+        progress(-1)
+        os.sync()
+    finally:
+        run(["umount", dest], check=False, quiet=True)
+    log("Archive extracted")
+
+
+# --------------------------------------------------------------------------
 # Jobs
 # --------------------------------------------------------------------------
 
@@ -833,6 +1112,8 @@ def main():
             write_image_dd(job, dev, dev_size)
         elif action == "iso":
             write_iso_mode(job, dev, dev_size, workdir)
+        elif action == "extract":
+            job_extract(job, dev, dev_size, workdir)
         else:
             raise JobError(f"Unknown action {action}")
         settle()
