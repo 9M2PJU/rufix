@@ -91,6 +91,15 @@ def field_label(text: str) -> Gtk.Label:
     return lbl
 
 
+def combo_box() -> Gtk.ComboBoxText:
+    # A non-zero wrap width makes GTK drop the menu below the widget instead
+    # of overlaying it on the active item, which breaks on Wayland (misplaced
+    # popups, scroll arrows, pixman "Invalid rectangle" errors).
+    combo = Gtk.ComboBoxText()
+    combo.set_wrap_width(1)
+    return combo
+
+
 def helper_command() -> List[str]:
     if FLATPAK:
         # The helper needs the host's formatting tools and raw device access,
@@ -400,13 +409,13 @@ class RufixWindow(Gtk.ApplicationWindow):
         main.pack_start(section("Drive Properties"), False, False, 0)
 
         main.pack_start(field_label("Device"), False, False, 0)
-        self.device_combo = Gtk.ComboBoxText()
+        self.device_combo = combo_box()
         self.device_combo.connect("changed", self._on_device_changed)
         main.pack_start(self.device_combo, False, False, 0)
 
         main.pack_start(field_label("Boot selection"), False, False, 0)
         row = Gtk.Box(spacing=6)
-        self.boot_combo = Gtk.ComboBoxText()
+        self.boot_combo = combo_box()
         self.boot_combo.append("image", "Disk or ISO image")
         self.boot_combo.append("archive", "Compressed file - extract to drive")
         self.boot_combo.append("none", "Non bootable")
@@ -428,7 +437,7 @@ class RufixWindow(Gtk.ApplicationWindow):
 
         self.mode_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         self.mode_box.pack_start(field_label("Image option"), False, False, 0)
-        self.mode_combo = Gtk.ComboBoxText()
+        self.mode_combo = combo_box()
         self.mode_combo.connect("changed", lambda *_: self._update_state())
         self.mode_box.pack_start(self.mode_combo, False, False, 0)
         for child in self.mode_box.get_children():
@@ -439,12 +448,12 @@ class RufixWindow(Gtk.ApplicationWindow):
         grid = Gtk.Grid(column_spacing=12, row_spacing=4, column_homogeneous=True)
         grid.attach(field_label("Partition scheme"), 0, 0, 1, 1)
         grid.attach(field_label("Target system"), 1, 0, 1, 1)
-        self.scheme_combo = Gtk.ComboBoxText()
+        self.scheme_combo = combo_box()
         self.scheme_combo.append("mbr", "MBR")
         self.scheme_combo.append("gpt", "GPT")
         self.scheme_combo.set_active_id("mbr")
         self.scheme_combo.connect("changed", lambda *_: self._update_state())
-        self.target_combo = Gtk.ComboBoxText()
+        self.target_combo = combo_box()
         self.target_combo.set_sensitive(False)
         grid.attach(self.scheme_combo, 0, 1, 1, 1)
         grid.attach(self.target_combo, 1, 1, 1, 1)
@@ -472,9 +481,9 @@ class RufixWindow(Gtk.ApplicationWindow):
         grid2 = Gtk.Grid(column_spacing=12, row_spacing=4, column_homogeneous=True)
         grid2.attach(field_label("File system"), 0, 0, 1, 1)
         grid2.attach(field_label("Cluster size"), 1, 0, 1, 1)
-        self.fs_combo = Gtk.ComboBoxText()
+        self.fs_combo = combo_box()
         self.fs_combo.connect("changed", self._on_fs_changed)
-        self.cluster_combo = Gtk.ComboBoxText()
+        self.cluster_combo = combo_box()
         grid2.attach(self.fs_combo, 0, 1, 1, 1)
         grid2.attach(self.cluster_combo, 1, 1, 1, 1)
         main.pack_start(grid2, False, False, 0)
@@ -487,7 +496,7 @@ class RufixWindow(Gtk.ApplicationWindow):
         self.quick_check.set_active(True)
         bb_row = Gtk.Box(spacing=6)
         self.bb_check = Gtk.CheckButton(label="Check device for bad blocks")
-        self.bb_combo = Gtk.ComboBoxText()
+        self.bb_combo = combo_box()
         for n in (1, 2, 3, 4):
             self.bb_combo.append(str(n), f"{n} pass" + ("es" if n > 1 else ""))
         self.bb_combo.set_active_id("1")

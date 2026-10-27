@@ -7,7 +7,7 @@ arch=('any')
 url="https://github.com/thuutien/rufix"
 license=('GPL-3.0-only')
 depends=('python' 'python-gobject' 'gtk3' 'polkit'
-         'dosfstools' 'e2fsprogs' 'exfatprogs' 'ntfs-3g'
+         'dosfstools' 'e2fsprogs' 'exfatprogs' 'ntfs-3g' 'ntfsprogs'
          'util-linux' 'systemd')
 optdepends=('wimlib: split Windows install.wim images larger than 4 GB for FAT32 drives'
             'parted: re-read partition tables via partprobe'

@@ -53,16 +53,16 @@ install_deps() {
             DEBIAN_FRONTEND=noninteractive apt-get install -y exfat-utils
     elif command -v dnf >/dev/null; then
         dnf install -y python3 python3-gobject gtk3 polkit \
-            dosfstools ntfs-3g exfatprogs e2fsprogs util-linux systemd parted
+            dosfstools ntfs-3g ntfsprogs exfatprogs e2fsprogs util-linux systemd parted
     elif command -v pacman >/dev/null; then
         pacman -Sy --needed --noconfirm python python-gobject gtk3 polkit \
-            dosfstools ntfs-3g exfatprogs e2fsprogs util-linux systemd parted
+            dosfstools ntfs-3g ntfsprogs exfatprogs e2fsprogs util-linux systemd parted
     elif command -v zypper >/dev/null; then
         zypper install -y python3 python3-gobject gtk3 polkit \
-            dosfstools ntfs-3g exfatprogs e2fsprogs util-linux systemd parted
+            dosfstools ntfs-3g ntfsprogs exfatprogs e2fsprogs util-linux systemd parted
     else
         echo "No supported package manager found; install dependencies manually" >&2
-        echo "(Python 3 GObject bindings, GTK 3, dosfstools, ntfs-3g, exfatprogs," >&2
+        echo "(Python 3 GObject bindings, GTK 3, dosfstools, ntfs-3g/ntfsprogs, exfatprogs," >&2
         echo " e2fsprogs, polkit, util-linux)." >&2
     fi
 }
