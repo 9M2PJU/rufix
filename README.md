@@ -62,7 +62,7 @@ This installs dependencies via `apt` / `dnf` / `pacman` / `zypper`,
 downloads the release tarball and runs the installer. Variants:
 
 ```bash
-curl -fsSL .../quick-install.sh | sudo bash -s -- 0.3.0      # pin a version
+curl -fsSL .../quick-install.sh | sudo bash -s -- 0.3.1      # pin a version
 curl -fsSL .../quick-install.sh | sudo bash -s -- --no-deps  # skip dependency install
 curl -fsSL .../quick-install.sh | sudo bash -s -- --uninstall
 ```
@@ -80,7 +80,7 @@ Or manually: `git clone https://aur.archlinux.org/rufix.git && cd rufix && makep
 Download `rufix-<version>-x86_64.flatpak` from the release page, then:
 
 ```bash
-flatpak install --user ./rufix-0.3.0-x86_64.flatpak
+flatpak install --user ./rufix-0.3.1-x86_64.flatpak
 flatpak run org.rufix.Rufix
 ```
 
@@ -93,7 +93,7 @@ push.
 ### Debian / Ubuntu / Linux Mint / Pop!_OS (.deb)
 
 ```bash
-sudo apt install ./rufix_0.3.0_all.deb
+sudo apt install ./rufix_0.3.1_all.deb
 ```
 
 `apt` pulls in all dependencies. For splitting large Windows images, also
@@ -102,8 +102,8 @@ install `wimtools`.
 ### Fedora / RHEL / openSUSE (.rpm)
 
 ```bash
-sudo dnf install ./rufix-0.3.0-1.noarch.rpm        # Fedora / RHEL
-sudo zypper install ./rufix-0.3.0-1.noarch.rpm     # openSUSE
+sudo dnf install ./rufix-0.3.1-1.noarch.rpm        # Fedora / RHEL
+sudo zypper install ./rufix-0.3.1-1.noarch.rpm     # openSUSE
 ```
 
 The package manager pulls in all dependencies. For splitting large Windows
@@ -111,11 +111,11 @@ images, also install `wimlib`.
 
 ### Portable AppImage
 
-Download `rufix-0.3.0-x86_64.AppImage`, make it executable and run it:
+Download `rufix-0.3.1-x86_64.AppImage`, make it executable and run it:
 
 ```bash
-chmod +x rufix-0.3.0-x86_64.AppImage
-./rufix-0.3.0-x86_64.AppImage
+chmod +x rufix-0.3.1-x86_64.AppImage
+./rufix-0.3.1-x86_64.AppImage
 ```
 
 It bundles Rufix itself and uses your system's Python 3, GTK 3 and
@@ -126,12 +126,12 @@ needed. (On older releases such as Ubuntu 20.04 / Mint 20, install
 
 ### Other distributions (tarball)
 
-Download `rufix-0.3.0.tar.gz`, install the dependencies (Python 3 GObject
+Download `rufix-0.3.1.tar.gz`, install the dependencies (Python 3 GObject
 bindings, GTK 3, dosfstools, ntfs-3g, exfatprogs, e2fsprogs, polkit,
 util-linux), then:
 
 ```bash
-tar xzf rufix-0.3.0.tar.gz && cd rufix-0.3.0 && sudo ./install.sh
+tar xzf rufix-0.3.1.tar.gz && cd rufix-0.3.1 && sudo ./install.sh
 ```
 
 ## Build the packages yourself
