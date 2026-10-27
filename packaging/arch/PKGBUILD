@@ -1,6 +1,6 @@
 # Maintainer: 9M2PJU <9m2pju@gmail.com>
 pkgname=rufix
-pkgver=0.3.0
+pkgver=0.3.1
 pkgrel=1
 pkgdesc="Rufus-style USB formatter and bootable drive creator for Linux (GTK3)"
 arch=('any')
@@ -16,7 +16,7 @@ optdepends=('wimlib: split Windows install.wim images larger than 4 GB for FAT32
             'libarchive: bsdtar fallback for extracting archives'
             'udisks2: remount the drive after writing so it shows in the file manager')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/thuutien/rufix/releases/download/v$pkgver/$pkgname-$pkgver.tar.gz")
-sha256sums=('5c00dfccbd6c6e63feb8bbfbe51791cae303507af8f8dad839f6339ca9365a34')
+sha256sums=('df5ff180d01774fab1615c2df3adbf166aff2f3a6f6e1fceadd5ba6cb0aa408f')
 
 package() {
   cd "$pkgname-$pkgver"
