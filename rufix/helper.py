@@ -33,6 +33,7 @@ import re
 import shutil
 import signal
 import stat
+import struct
 import subprocess
 import sys
 import tarfile
@@ -340,8 +341,9 @@ def mkfs(fs, part, label, cluster):
     tool = cmd[0]
     if not have(tool):
         pkg = {"mkfs.vfat": "dosfstools", "mkfs.exfat": "exfatprogs",
-               "mkntfs": "ntfs-3g", "mkfs.ext4": "e2fsprogs"}[tool]
-        raise JobError(f"{tool} not found - install it with: sudo apt install {pkg}")
+               "mkntfs": "ntfsprogs (ntfs-3g on Debian/Ubuntu)",
+               "mkfs.ext4": "e2fsprogs"}[tool]
+        raise JobError(f"{tool} not found - install the {pkg} package")
     run(cmd + [part])
 
 
@@ -547,6 +549,19 @@ def verify_device(dev, length, expected):
 # ISO (file copy) mode
 # --------------------------------------------------------------------------
 
+def mount_ntfs(part, dest, opts=None):
+    """Mount NTFS with whichever driver is available: the ntfs-3g FUSE driver,
+    then the kernel's ntfs3 / ntfs drivers (some distros ship without ntfs-3g)."""
+    extra = ["-o", opts] if opts else []
+    for fstype in ("ntfs-3g", "ntfs3", "ntfs"):
+        if run(["mount", "-t", fstype] + extra + [part, dest],
+               check=False, quiet=True).returncode == 0:
+            log(f"Mounted {part} as {fstype}")
+            return
+    raise JobError(f"Could not mount the NTFS partition {part}. Install ntfs-3g, "
+                   "or use a kernel with the ntfs3 driver.")
+
+
 def mount_iso(iso, mnt):
     for fstype in ("udf", "iso9660"):
         proc = run(["mount", "-o", "loop,ro", "-t", fstype, iso, mnt], check=False, quiet=True)
@@ -688,6 +703,18 @@ def build_unattend(opts, arch):
             + "\n".join(sections) + "\n</unattend>\n")
 
 
+def wim_is_solid(path):
+    """True for a solid (ESD-style, LZMS) WIM, which wimlib cannot split."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return False
+    if len(head) < 16 or head[:8] != b"MSWIM\0\0\0":
+        return False
+    return struct.unpack_from("<I", head, 12)[0] == 0xE00
+
+
 def split_wim(src_wim, dest_dir):
     status("Splitting install.wim for FAT32 (wimlib)...")
     progress(-1)
@@ -726,12 +753,18 @@ def write_iso_mode(job, dev, dev_size, workdir):
             layout = "dual"
         elif big:
             wim = [r for r, _ in big if r.lower() == os.path.join("sources", "install.wim")]
-            if is_windows and wim and len(big) == 1 and have("wimlib-imagex"):
+            solid = bool(wim) and wim_is_solid(os.path.join(iso_mnt, wim[0]))
+            if is_windows and wim and len(big) == 1 and have("wimlib-imagex") and not solid:
                 split = True
             elif is_windows:
                 layout = "dual"
-                log("install.wim is larger than 4 GB and wimlib-imagex is not installed "
-                    "(sudo apt install wimtools). Using a FAT32 boot + NTFS data layout.")
+                if solid:
+                    log("install.wim is larger than 4 GB and uses solid compression, which "
+                        "cannot be split. Using a FAT32 boot + NTFS data layout.")
+                else:
+                    log("install.wim is larger than 4 GB and wimlib-imagex is not installed "
+                        "(install wimlib, or wimtools on Debian/Ubuntu). "
+                        "Using a FAT32 boot + NTFS data layout.")
             else:
                 raise JobError("This ISO contains files larger than 4 GB which FAT32 cannot "
                                "store. Use DD mode instead.")
@@ -773,8 +806,7 @@ def write_iso_mode(job, dev, dev_size, workdir):
             os.makedirs(inst_dir)
             run(["mount", parts[0], boot_dir])
             mounts.append(boot_dir)
-            if run(["mount", "-t", "ntfs-3g", parts[1], inst_dir], check=False).returncode != 0:
-                run(["mount", parts[1], inst_dir])
+            mount_ntfs(parts[1], inst_dir)
             mounts.append(inst_dir)
             copy_total = total + boot_bytes
 
@@ -1053,10 +1085,7 @@ def job_extract(job, dev, dev_size, workdir):
     os.chmod(workdir, 0o711)
     uid, gid = invoking_user()
     if fs == "ntfs":
-        ok = run(["mount", "-t", "ntfs-3g", "-o", f"uid={uid},gid={gid}", part, dest],
-                 check=False).returncode == 0
-        if not ok:
-            run(["mount", "-o", f"uid={uid},gid={gid}", part, dest])
+        mount_ntfs(part, dest, f"uid={uid},gid={gid}")
     elif fs == "ext4":
         run(["mount", part, dest])
         os.chown(dest, uid, gid)
