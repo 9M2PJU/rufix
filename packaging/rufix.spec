@@ -17,6 +17,8 @@ Requires:       dosfstools
 Requires:       e2fsprogs
 Requires:       exfatprogs
 Requires:       ntfs-3g
+# mkntfs (split out of ntfs-3g on Fedora and openSUSE)
+Requires:       ntfsprogs
 Requires:       util-linux
 Requires:       systemd
 Recommends:     parted
