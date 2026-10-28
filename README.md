@@ -1,7 +1,7 @@
 # Rufix
 
 <p align="center">
-  <img src="data/rufix.png" alt="Rufix official logo" width="200">
+  <img src="data/rufix.png" alt="Rufix official logo — bootable USB tool for Linux" width="600">
 </p>
 
 [![AUR version](https://img.shields.io/aur/version/rufix)](https://aur.archlinux.org/packages/rufix)
