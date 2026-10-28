@@ -295,9 +295,14 @@ class RufixWindow(Gtk.ApplicationWindow):
         if Gtk.IconTheme.get_default().has_icon("rufix"):
             self.set_icon_name("rufix")
         else:
-            src_icon = os.path.join(os.path.dirname(HERE), "data", "rufix.svg")
-            if os.path.exists(src_icon):
-                self.set_icon_from_file(src_icon)
+            for name in ("rufix.png", "rufix.svg"):
+                src_icon = os.path.join(os.path.dirname(HERE), "data", name)
+                if os.path.exists(src_icon):
+                    try:
+                        self.set_icon_from_file(src_icon)
+                    except Exception:
+                        continue
+                    break
 
         self.devices: List[Device] = []
         self.device_sig = None
@@ -989,7 +994,21 @@ class RufixWindow(Gtk.ApplicationWindow):
         dlg = Gtk.AboutDialog(transient_for=self, modal=True)
         dlg.set_program_name(APP_NAME)
         dlg.set_version(__version__)
-        dlg.set_logo_icon_name("rufix")
+        logo = None
+        for name in ("rufix.png", "rufix.svg"):
+            path = os.path.join(os.path.dirname(HERE), "data", name)
+            if os.path.exists(path) and name.endswith(".png"):
+                try:
+                    from gi.repository import GdkPixbuf
+                    pix = GdkPixbuf.Pixbuf.new_from_file_at_size(path, 96, 96)
+                    logo = pix
+                    break
+                except Exception:
+                    continue
+        if logo is not None:
+            dlg.set_logo(logo)
+        else:
+            dlg.set_logo_icon_name("rufix")
         dlg.set_comments("Create bootable USB drives and format USB keys on Linux.\n"
                          "Inspired by Rufus (rufus.ie).")
         dlg.set_license_type(Gtk.License.GPL_3_0)
